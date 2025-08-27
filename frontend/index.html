@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Auto-Coder</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 to-gray-700 text-white min-h-screen flex items-center justify-center">
+    <div id="root" class="w-full"></div>
+
+    <!-- React and ReactDOM CDNs -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX transformation in the browser (for development only) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        // Main App component
+        const App = () => {
+            const [prompt, setPrompt] = React.useState('');
+            const [pinConfig, setPinConfig] = React.useState('');
+            const [wifiSsid, setWifiSsid] = React.useState('oplus_co_apofjt'); // Default WiFi SSID
+            const [wifiPassword, setWifiPassword] = React.useState('88888888'); // Default WiFi Password
+            const [telegramBotToken, setTelegramBotToken] = React.useState('8235623415:AAEG8_AEbp_Uf6OXrGQK-R-3WX60xyAsJbw'); // UPDATED Bot Token
+            const [telegramChatId, setTelegramChatId] = React.useState('7476432934'); // Default Chat ID
+            const [esp32Port, setEsp32Port] = React.useState('/dev/ttyUSB0'); // Default ESP32 Serial Port
+
+            const [generatedCode, setGeneratedCode] = React.useState('');
+            const [output, setOutput] = React.useState('');
+            const [isLoading, setIsLoading] = React.useState(false);
+
+            // Function to handle initial code generation
+            const generateCode = async () => {
+                setIsLoading(true); // Indicate that a long process has started
+                setGeneratedCode('');
+                setOutput('Initiating auto-coder process... Please wait, this can take 1-5 minutes depending on retries and network conditions.');
+
+                if (!prompt) {
+                    setOutput('Please enter a prompt.');
+                    setIsLoading(false);
+                    return;
+                }
+
+                try {
+                    // Send all data to the Python backend
+                    const response = await fetch('http://127.0.0.1:5000/generate_code_and_upload', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: `
+                                User Request: "${prompt}"
+                                Pin Configuration (if provided): "${pinConfig}"
+                                WiFi SSID: "${wifiSsid}"
+                                WiFi Password: "${wifiPassword}"
+                                Telegram Bot Token: "${telegramBotToken}"
+                                Telegram Chat ID: "${telegramChatId}"
+
+                                Generate a complete, runnable Arduino ESP32 sketch based on the user's request and provided configurations.
+                                
+                                General Requirements for ALL sketches:
+                                - Include a Serial.println("ESP32 Ready!"); at the very end of the setup() function.
+                                - Include a Serial.flush(); right after "ESP32 Ready!" to ensure the message is sent.
+                                - Do NOT use http.setNoActivityTimeout() or http.setConnectTimeout() as these methods might not be supported on all HTTPClient versions or can cause issues. Rely on default timeouts.
+                                - Provide only the complete, runnable Arduino sketch code, no extra text or conversational filler.
+                            `,
+                            pinConfig, 
+                            wifiSsid,
+                            wifiPassword,
+                            telegramBotToken,
+                            telegramChatId,
+                            esp32Port
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(`Backend error: ${response.status} - ${errorData.error || 'Unknown error'}`);
+                    }
+
+                    const data = await response.json();
+                    setGeneratedCode(data.generated_code);
+                    setOutput(data.output_log);
+
+                } catch (error) {
+                    console.error('Error in auto-coder process:', error);
+                    setOutput(`Error in auto-coder process: ${error.message}. Please ensure your Python backend is running and accessible.`);
+                } finally {
+                    setIsLoading(false); // Process finished (success or failure)
+                }
+            };
+
+            // Function to download the generated code as an .ino file
+            const downloadCode = () => {
+                if (!generatedCode) {
+                    setOutput('No code to download yet!');
+                    return;
+                }
+                const filename = 'auto_generated_sketch.ino';
+                const blob = new Blob([generatedCode], { type: 'text/plain;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setOutput(prev => prev + `\nCode downloaded as ${filename}`);
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white p-4 sm:p-8 flex flex-col items-center">
+                    <h1 className="text-4xl sm:text-5xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600 rounded-lg p-2">
+                        Auto-Coder for ESP32
+                    </h1>
+                    <p className="text-lg text-gray-300 mb-8 text-center max-w-2xl">
+                        Enter your desired functionality, pin configurations, and network details. The AI will generate code, and iterate to rectify compilation errors.
+                        <br/>
+                        <span className="font-semibold text-purple-300">Estimated time: 1-5 minutes, depending on AI response time and number of rectification attempts.</span>
+                    </p>
+
+                    <div className="w-full max-w-4xl bg-gray-800 rounded-xl shadow-lg p-6 mb-8 glass-effect">
+                        <div className="mb-4">
+                            <label htmlFor="prompt" className="block text-gray-300 text-sm font-bold mb-2">
+                                Your Prompt (e.g., "Blink an LED on pin 2")
+                            </label>
+                            <textarea
+                                id="prompt"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-900 leading-tight focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-200"
+                                rows="3"
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                                placeholder="e.g., 'Read temperature from DHT11 on pin 4 and display on serial monitor. If temperature > 30C, turn on LED on pin 2.'"
+                            ></textarea>
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="pinConfig" className="block text-gray-300 text-sm font-bold mb-2">
+                                Pin Configuration (Optional, e.g., "LED_PIN: 2, DHT_PIN: 4")
+                            </label>
+                            <input
+                                type="text"
+                                id="pinConfig"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-900 leading-tight focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-200"
+                                value={pinConfig}
+                                onChange={(e) => setPinConfig(e.target.value)}
+                                placeholder="e.g., 'LED_PIN: 2, DHT_PIN: 4'"
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="wifiSsid" className="block text-gray-300 text-sm font-bold mb-2">
+                                WiFi SSID
+                            </label>
+                            <input
+                                type="text"
+                                id="wifiSsid"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-900 leading-tight focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-200"
+                                value={wifiSsid}
+                                onChange={(e) => setWifiSsid(e.target.value)}
+                                placeholder="Your WiFi Network Name"
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="wifiPassword" className="block text-gray-300 text-sm font-bold mb-2">
+                                WiFi Password
+                            </label>
+                            <input
+                                type="password"
+                                id="wifiPassword"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-900 leading-tight focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-200"
+                                value={wifiPassword}
+                                onChange={(e) => setWifiPassword(e.target.value)}
+                                placeholder="Your WiFi Password"
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="telegramBotToken" className="block text-gray-300 text-sm font-bold mb-2">
+                                Telegram Bot Token
+                            </label>
+                            <input
+                                type="text"
+                                id="telegramBotToken"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-900 leading-tight focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-200"
+                                value={telegramBotToken}
+                                onChange={(e) => setTelegramBotToken(e.target.value)}
+                                placeholder="Your Telegram Bot Token"
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="telegramChatId" className="block text-gray-300 text-sm font-bold mb-2">
+                                Telegram Chat ID
+                            </label>
+                            <input
+                                type="text"
+                                id="telegramChatId"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-900 leading-tight focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-200"
+                                value={telegramChatId}
+                                onChange={(e) => setTelegramChatId(e.target.value)}
+                                placeholder="Your Telegram Chat ID"
+                            />
+                        </div>
+                        <div className="mb-6">
+                            <label htmlFor="esp32Port" className="block text-gray-300 text-sm font-bold mb-2">
+                                ESP32 Serial Port (e.g., /dev/ttyUSB0)
+                            </label>
+                            <input
+                                type="text"
+                                id="esp32Port"
+                                className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-900 leading-tight focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-200"
+                                value={esp32Port}
+                                onChange={(e) => setEsp32Port(e.target.value)}
+                                placeholder="e.g., /dev/ttyUSB0 or COM3"
+                            />
+                        </div>
+                        <button
+                            onClick={generateCode}
+                            className="w-full bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline transition duration-300 ease-in-out transform hover:scale-105"
+                            disabled={isLoading}
+                        >
+                            {isLoading ? 'Processing...' : 'Generate Code & Upload to ESP32'}
+                        </button>
+                    </div>
+
+                    {isLoading && (
+                        <div className="flex items-center justify-center text-purple-400 mb-4">
+                            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-purple-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            AI is working, compiling, uploading, and checking...
+                        </div>
+                    )}
+
+                    {generatedCode && (
+                        <div className="w-full max-w-4xl bg-gray-800 rounded-xl shadow-lg p-6 mb-8 glass-effect">
+                            <h2 className="text-2xl font-bold mb-4 text-purple-400">Generated Arduino Code</h2>
+                            <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm">
+                                <code>{generatedCode}</code>
+                            </pre>
+                            <button
+                                onClick={downloadCode}
+                                className="mt-4 w-full bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-600 hover:to-blue-600 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline transition duration-300 ease-in-out transform hover:scale-105"
+                            >
+                                Download Code (.ino)
+                            </button>
+                        </div>
+                    )}
+
+                    {output && (
+                        <div className="w-full max-w-4xl bg-gray-800 rounded-xl shadow-lg p-6 glass-effect">
+                            <h2 className="text-2xl font-bold mb-4 text-pink-400">Output/Logs</h2>
+                            <pre className="bg-gray-900 text-yellow-300 p-4 rounded-lg overflow-x-auto text-sm whitespace-pre-wrap">
+                                <code>{output}</code>
+                            </pre>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Render the App component into the 'root' div
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
